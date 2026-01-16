@@ -1,9 +1,3 @@
-import pyodbc
-from pathlib import Path
-import pandas as pd
-import os
-from warnings import filterwarnings
-
 class MDBReader:
     def __init__(self, mdb_path):
         """
@@ -103,63 +97,4 @@ class MDBReader:
         df.to_csv(output_path, index=False)
         print(f"Data saved to {output_path}")
 
-
-
-
-def combine_mdb_files_to_single_csv(root_folder, output_file):
-    """
-    Combines TankRecords from all .mdb files into one CSV file
-    
-    Args:
-        root_folder (str): Folder to search for .mdb files
-        output_file (str): Path for combined output CSV file
-    """
-    columns = [
-        "BACKGROUND_TIME_STAMP",
-        "TANK_NAME",
-        "PRODUCT_NAME",
-        "PRODUCT_TEMP",
-        "CORRECTION_FACTOR",
-        "GSV",
-        "PRODUCT_LEVEL"
-    ]
-    
-    all_data = []
-    processed_files = 0
-    
-    # Find all .mdb files recursively
-    for root, _, files in os.walk(root_folder):
-        for file in files:
-            if file.lower().endswith('.mdb'):
-                mdb_path = os.path.join(root, file)
-                try:
-                    with MDBReader(mdb_path) as reader:
-                        print(f"Processing: {file}")
-                        df = reader.read_table_data("TankRecords", columns)
-                        all_data.append(df)
-                        processed_files += 1
-                except Exception as e:
-                    print(f"Error processing {file}: {str(e)}")
-                    continue
-    
-    if not all_data:
-        print("No valid .mdb files found with TankRecords table")
-        return
-    
-    # Combine all DataFrames
-    combined_df = pd.concat(all_data, ignore_index=True)
-    
-    # Save to single CSV
-    combined_df.to_csv(output_file, index=False)
-    print(f"\nSuccess! Combined data from {processed_files} files into {output_file}")
-    print(f"Total records: {len(combined_df)}")
-
-
-if __name__ == "__main__":
-    # Configure these paths as needed:
-    search_folder = r""
-    output_csv = "Combined Tank records.csv"
-    
-    # Process all files and combine into one CSV
-    combine_mdb_files_to_single_csv(search_folder, output_csv)
 
