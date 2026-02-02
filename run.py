@@ -81,32 +81,117 @@ class MDBReader:
             # Read into DataFrame with proper typing
             df = pd.read_sql(query, self.conn)
             
-            # Ensure formatting (redundant safety)
+         
             if "PRODUCT_TEMP" in df.columns:
                 df["PRODUCT_TEMP"] = df["PRODUCT_TEMP"].round(2)
             if "GSV" in df.columns:
                 df["GSV"] = df["GSV"].astype(int)
-                
+            if "BACKGROUND_TIME_STAMP" in df.columns:
+                df["BACKGROUND_TIME_STAMP"] = pd.to_datetime(df["BACKGROUND_TIME_STAMP"])
+                # Round down to minute precision
+                df["BACKGROUND_TIME_STAMP"] = df["BACKGROUND_TIME_STAMP"].dt.round('2min')
             return df
             
         except pyodbc.Error as e:
             raise RuntimeError(f"Query failed: {str(e)}")
 
-    def save_to_csv(self, table_name, output_path, columns=None):
+    def save_to_csv(self, columns):
         """
-        Save table data to CSV with formatting
-        :param table_name: Table to export
-        :param output_path: Output CSV path
-        :param columns: Optional list of columns to export
+        Prompt user to select fuel grade(s) and generate reports
         """
-        df = self.read_table_data(table_name, columns)
-        df.to_csv(output_path, index=False)
-        print(f"Data saved to {output_path}")
+
+        print("\nSelect grade(s) to extract:")
+        print("1 - D50")
+        print("2 - ULP")
+        print("3 - KERO")
+        print("4 - JET A1")
+        print("5 - All Grades")
+        print("You can select multiple grades (comma separated), e.g. 1,2")
+
+        choice = input("Enter your choice: ").strip()
+
+        grade_map = {
+            "1": "DIESEL",
+            "2": "ULP",
+            "3": "KERO",
+            "4": "JET A1",
+            "5": "All"
+        }
+
+        selected_grades = []
+        if grade_map.get(choice) == "All":
+            selected_grades = ["DIESEL", "ULP", "KERO", "JET A1"]
+        else:
+            for c in choice.split(","):
+                c = c.strip()
+                print(c)
+                if c in grade_map:
+                    selected_grades.append(grade_map[c])
+
+        if not selected_grades:
+            print("No valid grade selected. Exiting.")
+            return
+
+        for grade in selected_grades:
+            print(f"Extracting {grade} report...")
+            self.Grade_Extract(columns, grade)
 
 
+    def Grade_Extract(self, combined_df, grade_name):
+        """
+        Extract ULP data from combined DataFrame
+        
+    """
 
+        # Ensure correct ordering
+        
+        ulp_df = combined_df[combined_df['PRODUCT_NAME'].str.contains(grade_name, case=False, na=False)].copy()
+        ulp_df.sort_values(by=["BACKGROUND_TIME_STAMP", "TANK_NAME"], inplace=True)
+        tank_cols = [
+            "PRODUCT_NAME",
+            "PRODUCT_TEMP",
+            "CORRECTION_FACTOR",
+            "GSV",
+            "PRODUCT_LEVEL",
+        ]
 
-def combine_mdb_files_to_single_csv(root_folder, output_file):
+        # Fixed tank order (critical)
+        tank_order = sorted(ulp_df["TANK_NAME"].unique())
+
+        rows = []
+
+        for ts in sorted(ulp_df["BACKGROUND_TIME_STAMP"].unique()):
+            row = [ts]
+
+            for tank in tank_order:
+                rec = ulp_df[
+                    (ulp_df["BACKGROUND_TIME_STAMP"] == ts) &
+                    (ulp_df["TANK_NAME"] == tank)
+                ]
+
+                if not rec.empty:
+                    row.append(tank)  # keep tank name aligned
+                    row.extend(rec.iloc[0][tank_cols].tolist())
+                else:
+                    # missing tank at this timestamp → placeholders
+                    row.append(tank)
+                    row.extend([None] * len(tank_cols))
+
+            rows.append(row)
+
+        # Build columns
+        columns = ["BACKGROUND_TIME_STAMP"]
+        for _ in tank_order:
+            columns.extend(
+                ["TANK_NAME"] + tank_cols
+            )
+
+        wide_df = pd.DataFrame(rows, columns=columns)
+        wide_df.to_csv(f"{grade_name} Grade_report.csv", index=False)
+        print("Data saved to Grade_report.csv")
+            
+        
+def combine_mdb_files_to_single_csv(root_folder,output_file):
     """
     Combines TankRecords from all .mdb files into one CSV file
     
@@ -148,16 +233,17 @@ def combine_mdb_files_to_single_csv(root_folder, output_file):
     
     # Combine all DataFrames
     combined_df = pd.concat(all_data, ignore_index=True)
-    
-    # Save to single CSV
-    combined_df.to_csv(output_file, index=False)
-    print(f"\nSuccess! Combined data from {processed_files} files into {output_file}")
+    print(combined_df)
     print(f"Total records: {len(combined_df)}")
+    reader.save_to_csv(combined_df)
+  
+    
 
 
 if __name__ == "__main__":
     # Configure these paths as needed:
-    search_folder = r""
+    search_folder = r"C:\Users\Salmaan\Documents\ENRAF Report Extractor\ENRAF REPORTS"
+    
     output_csv = "Combined Tank records.csv"
     
     # Process all files and combine into one CSV
